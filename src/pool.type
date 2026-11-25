@@ -1,0 +1,314 @@
+positiveInteger = (value, fallback) ->
+  (if Number.isInteger(value) and Number(value) > 0 then Number(value) else fallback)
+
+nonNegativeInteger = (value, fallback) ->
+  (if Number.isInteger(value) and Number(value) >= 0 then Number(value) else fallback)
+
+abortError = ->
+  error = new Error('CPU task aborted')
+  error.name = 'AbortError'
+  error
+
+'use strict'
+__importDefault = this and @__importDefault or (mod) ->
+  (if mod and mod.__esModule then mod else 'default': mod)
+Object.defineProperty exports, '__esModule', value: true
+exports.CpuWorkerPool = exports.CpuTaskTimeoutError = exports.CpuQueueFullError = undefined
+node_worker_threads_1 = require('node:worker_threads')
+node_path_1 = __importDefault(require('node:path'))
+class CpuQueueFullError extends Error
+  constructor: (capacity) ->
+    super 'CPU worker queue is full ('.concat(capacity, ')')
+    @code = 'CPU_QUEUE_FULL'
+    @capacity = capacity
+    @name = 'CpuQueueFullError'
+    return
+exports.CpuQueueFullError = CpuQueueFullError
+class CpuTaskTimeoutError extends Error
+  constructor: (timeoutMs) ->
+    super 'CPU task timed out after '.concat(timeoutMs, 'ms')
+    @code = 'CPU_TASK_TIMEOUT'
+    @timeoutMs = timeoutMs
+    @name = 'CpuTaskTimeoutError'
+    return
+exports.CpuTaskTimeoutError = CpuTaskTimeoutError
+
+###* Bounded pool for trusted, CPU-bound modules. Workers are reused; overload is rejected. ###
+
+class CpuWorkerPool
+  constructor: (options) ->
+    if `options == void 0`
+      options = {}
+    @slots = []
+    @queue = []
+    @sequence = 0
+    @closed = false
+    @totals =
+      submitted: 0
+      completed: 0
+      failed: 0
+      rejected: 0
+      timedOut: 0
+      cancelled: 0
+    @size = positiveInteger(options.size, Math.max(1, Math.min(4, Number(process.env.UV_THREADPOOL_SIZE) or 4)))
+    @maxQueue = nonNegativeInteger(options.maxQueue, @size * 8)
+    @taskTimeoutMs = positiveInteger(options.taskTimeoutMs, 30000)
+    return
+  run: (modulePath, args, options) ->
+    _this = this
+    _a = undefined
+    if `args == void 0`
+      args = []
+    if `options == void 0`
+      options = {}
+    if @closed
+      return Promise.reject(new Error('CPU worker pool is closed'))
+    if !node_path_1.default.isAbsolute(modulePath)
+      return Promise.reject(new TypeError('CPU worker module path must be absolute'))
+    if !Array.isArray(args)
+      return Promise.reject(new TypeError('CPU worker arguments must be an array'))
+    if (if `(_a = options.signal) == null` or `_a == void 0` then undefined else _a.aborted)
+      return Promise.reject(abortError())
+    idle = @slots.find((slot) ->
+      !slot.task
+    )
+    if !idle and @slots.length >= @size and @queue.length >= @maxQueue
+      @totals.rejected++
+      return Promise.reject(new CpuQueueFullError(@maxQueue))
+    @totals.submitted++
+    new Promise((resolve, reject) ->
+      `var _a`
+      _a = undefined
+      _b = undefined
+      task =
+        id: ++_this.sequence
+        module: modulePath
+        exportName: (if `(_a = options.exportName) != null` and `_a != void 0` then _a else 'default')
+        args: args
+        timeoutMs: positiveInteger(options.timeoutMs, _this.taskTimeoutMs)
+        signal: options.signal
+        resolve: resolve
+        reject: reject
+
+      task.abort = ->
+        _this.cancel task
+
+      (if `(_b = task.signal) == null` or `_b == void 0` then undefined else _b.addEventListener('abort', task.abort, once: true))
+      if idle
+        _this.assign idle, task
+      else if _this.slots.length < _this.size
+        slot = _this.createSlot()
+        _this.assign slot, task
+      else
+        _this.queue.push task
+      return
+  )
+  snapshot: ->
+    __assign = ->
+      __assign = Object.assign or (t) ->
+        s = undefined
+        i = 1
+        n = arguments.length
+        while i < n
+          s = arguments[i]
+          for p of s
+            if Object::hasOwnProperty.call(s, p)
+              t[p] = s[p]
+          i++
+        t
+      __assign.apply this, arguments
+    __assign {
+      size: @size
+      running: @slots.filter((slot) ->
+        slot.task
+      ).length
+      queued: @queue.length
+      maxQueue: @maxQueue
+    }, @totals
+  close: ->
+    __values = (o) ->
+      s = `typeof Symbol == 'function'` and Symbol.iterator
+      m = s and o[s]
+      i = 0
+      if m
+        return m.call(o)
+      if o and `typeof o.length == 'number'`
+        return { next: ->
+          if o and i >= o.length
+            o = undefined
+          {
+            value: o and o[i++]
+            done: !o
+          }
+     }
+      throw new TypeError((if s then 'Object is not iterable.' else 'Symbol.iterator is not defined.'))
+      return
+    e_1 = undefined
+    _a = undefined
+    e_2 = undefined
+    _b = undefined
+    await undefined if false
+    if @closed
+      return
+    @closed = true
+    try
+      _c = __values(@queue.splice(0))
+      _d = _c.next()
+      while !_d.done
+        task = _d.value
+        @finishTask task, new Error('CPU worker pool closed')
+        _d = _c.next()
+    catch e_1_1
+      e_1 = error: e_1_1
+    finally
+      try
+        if _d and !_d.done and (_a = _c.return)
+          _a.call _c
+      catch __caught
+        throw __caught
+      finally
+        if e_1
+          throw e_1.error
+    slots = @slots.splice(0)
+    try
+      slots_1 = __values(slots)
+      slots_1_1 = slots_1.next()
+      while !slots_1_1.done
+        slot = slots_1_1.value
+        if slot.timer
+          clearTimeout slot.timer
+        if slot.task
+          @finishTask slot.task, new Error('CPU worker pool closed')
+        slots_1_1 = slots_1.next()
+    catch e_2_1
+      e_2 = error: e_2_1
+    finally
+      try
+        if slots_1_1 and !slots_1_1.done and (_b = slots_1.return)
+          _b.call slots_1
+      catch __caught
+        throw __caught
+      finally
+        if e_2
+          throw e_2.error
+    await Promise.all(slots.map((slot) ->
+      slot.worker.terminate().catch ->
+        `undefined`
+    ))
+    return
+  createSlot: ->
+    _this = this
+    slot =
+      worker: null
+      task: null
+      timer: null
+    workerPath = node_path_1.default.join(__dirname, 'cpu-worker.js')
+    slot.worker = new (node_worker_threads_1.Worker)(workerPath)
+    slot.worker.on 'message', (message) ->
+      _this.onMessage slot, message
+    slot.worker.on 'error', (error) ->
+      _this.replace slot, error
+    slot.worker.on 'exit', (code) ->
+      if !_this.closed and `code != 0`
+        _this.replace slot, new Error('CPU worker exited ('.concat(code, ')'))
+      return
+    @slots.push slot
+    slot
+  assign: (slot, task) ->
+    _this = this
+    _a = undefined
+    _b = undefined
+    slot.task = task
+    slot.timer = setTimeout((->
+      _this.totals.timedOut++
+      _this.replace slot, new CpuTaskTimeoutError(task.timeoutMs)
+      return
+    ), task.timeoutMs)
+    (if `(_b = (_a = slot.timer).unref) == null` or `_b == void 0` then undefined else _b.call(_a))
+    slot.worker.postMessage
+      id: task.id
+      module: task.module
+      exportName: task.exportName
+      args: task.args
+    return
+  onMessage: (slot, message) ->
+    task = slot.task
+    if !task or `(message === null || message === void 0 ? void 0 : message.id) != task.id`
+      return
+    if slot.timer
+      clearTimeout slot.timer
+    slot.timer = null
+    slot.task = null
+    if message.error
+      error = new Error(message.error.message)
+      error.name = message.error.name
+      if message.error.stack
+        error.stack = message.error.stack
+      @finishTask task, error
+      @totals.failed++
+    else
+      @finishTask task, null, message.result
+      @totals.completed++
+    @drain slot
+    return
+  cancel: (task) ->
+    queued = @queue.indexOf(task)
+    if queued >= 0
+      @queue.splice queued, 1
+      @totals.cancelled++
+      @finishTask task, abortError()
+      return
+    slot = @slots.find((candidate) ->
+      `candidate.task == task`
+    )
+    if slot
+      @totals.cancelled++
+      @replace slot, abortError()
+    return
+  replace: (slot, error) ->
+    _this = this
+    if !@slots.includes(slot)
+      return
+    if slot.timer
+      clearTimeout slot.timer
+    task = slot.task
+    slot.task = null
+    slot.timer = null
+    if task
+      @finishTask task, error
+      if !`error.name == 'AbortError'` and !(error instanceof CpuTaskTimeoutError)
+        @totals.failed++
+    slot.worker.terminate().catch ->
+      `undefined`
+    if @closed
+      return
+    index = @slots.indexOf(slot)
+    replacement =
+      worker: null
+      task: null
+      timer: null
+    workerPath = node_path_1.default.join(__dirname, 'cpu-worker.js')
+    replacement.worker = new (node_worker_threads_1.Worker)(workerPath)
+    replacement.worker.on 'message', (message) ->
+      _this.onMessage replacement, message
+    replacement.worker.on 'error', (next) ->
+      _this.replace replacement, next
+    replacement.worker.on 'exit', (code) ->
+      if !_this.closed and `code != 0`
+        _this.replace replacement, new Error('CPU worker exited ('.concat(code, ')'))
+      return
+    @slots[index] = replacement
+    @drain replacement
+    return
+  drain: (slot) ->
+    next = @queue.shift()
+    if next
+      @assign slot, next
+    return
+  finishTask: (task, error, result) ->
+    _a = undefined
+    if task.abort
+      (if `(_a = task.signal) == null` or `_a == void 0` then undefined else _a.removeEventListener('abort', task.abort))
+    (if error then task.reject(error) else task.resolve(result))
+    return
+exports.CpuWorkerPool = CpuWorkerPool

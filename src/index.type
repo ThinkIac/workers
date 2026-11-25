@@ -1,0 +1,98 @@
+provideWorkers = (host) ->
+
+  ###*
+  # @register module workers
+  # @context capability
+  ###
+
+  pool = null
+  {
+    name: 'workers'
+    phase: 'boot'
+    swappable: false
+    api: getPool: ->
+      pool
+    install: ->
+      if `host.config().workers != false`
+        pool = new CpuWorkerPool(host.config().workers)
+      host.state('runtime').set 'workers', pool
+      return
+    close: ->
+      (if `pool == null` or `pool == void 0` then undefined else pool.close())
+
+  }
+
+requireCapabilityDependency = (name, local) ->
+  entry = undefined
+  try
+    entry = require.resolve(name)
+  catch error
+    if `error.code != 'MODULE_NOT_FOUND'`
+      throw error
+    entry = require.resolve(local)
+  require entry
+
+'use strict'
+__assign = this and @__assign or ->
+  __assign = Object.assign or (t) ->
+    s = undefined
+    i = 1
+    n = arguments.length
+    while i < n
+      s = arguments[i]
+      for p of s
+        if Object::hasOwnProperty.call(s, p)
+          t[p] = s[p]
+      i++
+    t
+  __assign.apply this, arguments
+__read = this and @__read or (o, n) ->
+  m = `typeof Symbol == 'function'` and o[Symbol.iterator]
+  if !m
+    return o
+  i = m.call(o)
+  r = undefined
+  ar = []
+  e = undefined
+  try
+    while (`n == void 0` or n-- > 0) and !(r = i.next()).done
+      ar.push r.value
+  catch error
+    e = error: error
+  finally
+    try
+      if r and !r.done and (m = i['return'])
+        m.call i
+    catch __caught
+      throw __caught
+    finally
+      if e
+        throw e.error
+  ar
+__spreadArray = this and @__spreadArray or (to, from, pack) ->
+  if pack or `arguments.length == 2`
+    i = 0
+    l = from.length
+    ar = undefined
+    while i < l
+      if ar or !(i of from)
+        if !ar
+          ar = Array::slice.call(from, 0, i)
+        ar[i] = from[i]
+      i++
+  to.concat ar or Array::slice.call(from)
+CpuWorkerPool = require('./pool.cjs').CpuWorkerPool
+module.exports = __assign({ provideWorkers: provideWorkers }, require('./pool.cjs'))
+# Compatibility factories resolve their SDK from their own dependency graph.
+
+module.exports.createHost = ->
+  _a = undefined
+  args = []
+  _i = 0
+  while _i < arguments.length
+    args[_i] = arguments[_i]
+    _i++
+  (_a = requireCapabilityDependency('@thinkiac/module-runtime-compat', '../runtime-compat')).createHost.apply _a, __spreadArray([], __read(args), false)
+
+# Library alias for existing direct consumers; not used for runtime discovery.
+module.exports.createRuntimeModule = provideWorkers

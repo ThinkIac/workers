@@ -1,0 +1,17 @@
+# This bootstrap runs inside a Node worker thread. It is not a sandbox.
+{parentPort} = require 'node:worker_threads'
+{pathToFileURL} = require 'node:url'
+throw new Error 'CPU worker requires a parent port' unless parentPort
+
+parentPort.on 'message', (message) ->
+  {id, module: modulePath, exportName, args} = message
+  try
+    # Keep native import() to support ESM as well as CommonJS tasks.
+    loaded = await `import(pathToFileURL(modulePath).href)`
+    fn = if exportName is 'default' then loaded.default else loaded[exportName]
+    throw new TypeError "Worker export \"#{exportName}\" is not a function" unless typeof fn is 'function'
+    result = await fn args...
+    parentPort.postMessage {id, result}
+  catch error
+    parentPort.postMessage {id, error: {name: error?.name or 'Error', message: error?.message or String(error), stack: error?.stack}}
+  return

@@ -1,0 +1,40 @@
+{
+  "name": "@thinkiac/module-workers",
+  "version": "0.1.0",
+  "description": "Bounded CPU worker thread capability",
+  "main": "index.cjs",
+  "files": [
+    "*.cjs",
+    "*.js",
+    "compat",
+    "src",
+    "dist",
+    "scripts",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "runtime": {
+    "role": "module",
+    "entry": "index.cjs"
+  },
+  "dependencies": {
+    "@thinkiac/module-runtime-compat": "git+https://github.com/ThinkIac/runtime-compat.git#cdc7111e66614bb1ed4a80901b3363587b3e6f0a"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ThinkIac/workers.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test test/*.test.cjs"
+  },
+  "devDependencies": {
+    "logostype": "git+https://github.com/ThinkIac/LogosType.git#acdcc6032ab94219e0d4a4d25b1538fb55fa19cf"
+  }
+}
